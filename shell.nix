@@ -1,68 +1,94 @@
-{ pkgs ? import <nixpkgs> {} }:
+{ pkgs, lib, stdenv, ... }:
 
 let
-  python = pkgs.python310; # Define the Python version
-  pythonPackages = python.pkgs; # Access to Python packages
-in pkgs.mkShell rec {
-  name = "python-ot-gencol";
-  venvDir = "./.venv"; # Specify the directory for the virtual environment
+  python = pkgs.python311;
+  pythonPackages = pkgs.python311Packages;
+  # https://github.com/NixOS/nixpkgs/blob/c339c066b893e5683830ba870b1ccd3bbea88ece/nixos/modules/programs/nix-ld.nix#L44
+  # > We currently take all libraries from systemd and nix as the default.
+  pythonldlibpath = lib.makeLibraryPath (with pkgs; [
+    zlib
+    zstd
+    stdenv.cc.cc
+    curl
+    openssl
+    attr
+    libssh
+    bzip2
+    libxml2
+    acl
+    libsodium
+    util-linux
+    xz
+    systemd
+  ]);
+  patchedpython = (python.overrideAttrs (
+    previousAttrs: {
+      # Add the nix-ld libraries to the LD_LIBRARY_PATH.
+      # creating a new library path from all desired libraries
+      postInstall = previousAttrs.postInstall + ''
+        mv  "$out/bin/python3.11" "$out/bin/unpatched_python3.11"
+        cat << EOF >> "$out/bin/python3.11"
+        #!/run/current-system/sw/bin/bash
+        export LD_LIBRARY_PATH="${pythonldlibpath}"
+        exec "$out/bin/unpatched_python3.11" "\$@"
+        EOF
+        chmod +x "$out/bin/python3.11"
+      '';
+    }
+  ));
+  # if you want poetry
+  patchedpoetry =  ((pkgs.poetry.override { python3 = patchedpython; }).overrideAttrs (
+    previousAttrs: {
+      # same as above, but for poetry
+      # not that if you dont keep the blank line bellow, it crashes :(
+      postInstall = previousAttrs.postInstall + ''
 
-  shell = pkgs.fish;
-
-  # Adding venvShellHook to manage the virtual environment
+        mv "$out/bin/poetry" "$out/bin/unpatched_poetry"
+        cat << EOF >> "$out/bin/poetry"
+        #!/run/current-system/sw/bin/bash
+        export LD_LIBRARY_PATH="${pythonldlibpath}"
+        exec "$out/bin/unpatched_poetry" "\$@"
+        EOF
+        chmod +x "$out/bin/poetry"
+      '';
+    }
+  ));
+in
+pkgs.mkShell {
+  # environment.systemPackages = with pkgs; [
+  #   patchedpython
+  #   # if you want poetry
+  #   patchedpoetry
+  # ];
   buildInputs = [
-    # jupyter lab needs
-    pkgs.stdenv.cc.cc.lib
-
+    # pythonPackages.python
+    patchedpython
+    patchedpoetry
     pythonPackages.venvShellHook
-    python
+
+    # pythonPackages.pygobject3
+
+    # gobject-introspection
+    # gtk3
     pythonPackages.ipykernel
     pythonPackages.jupyterlab
+    pythonPackages.notebook
 
-    # System utilities
-    pkgs.git
-    pkgs.openssl
-    pkgs.zlib
-
-    # Additional libraries
-    pkgs.libxml2
-    pkgs.libxslt
-    pkgs.libzip
+    pythonPackages.numpy
+    pythonPackages.scipy
+    pythonPackages.matplotlib
+    pythonPackages.tqdm
   ];
-
-  # Use the venvShellHook to automate the activation of the virtual environment
-  # shellHook = ''
-  #   echo "Activating virtual environment located in ${venvDir}..."
-  # '';
-  #
-  # # Optional: Configuration for post-creation of virtual environment
-  # postVenvCreation = [
-  #   ''
-  #     unset SOURCE_DATE_EPOCH
-  #     # Optional: Install Jupyter kernel
-  #     echo "Installing IPython kernel..."
-  #     python -m ipykernel install --user --name=${name} --display-name="${name}"
-  #   ''
-  # ];
-  #
-  # postShellHook = ''
-  #   unset SOURCE_DATE_EPOCH
-  # '';
-
-  # Run this command, only after creating the virtual environment
+  # packages = [ pkgs.poetry ];
+  venvDir = "./.venv";
   postVenvCreation = ''
-    unset SOURCE_DATE_EPOCH
-    
-    python -m ipykernel install --user --name=${name} --display-name="${name}"
-    pip install -r requirements.txt
+    # unset SOURCE_DATE_EPOCH
+    poetry env use .venv/bin/python
+    poetry install
   '';
-
-  # Now we can execute any commands within the virtual environment.
-  # This is optional and can be left out to run pip manually.
   postShellHook = ''
-    # allow pip to install wheels
-    unset SOURCE_DATE_EPOCH
+    # unset SOURCE_DATE_EPOCH
+    # export LD_LIBRARY_PATH=${lib.makeLibraryPath [stdenv.cc.cc]}
+    poetry env info
   '';
-
-
 }
