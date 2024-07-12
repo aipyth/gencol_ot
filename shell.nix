@@ -78,6 +78,8 @@ pkgs.mkShell {
     pythonPackages.scipy
     pythonPackages.matplotlib
     pythonPackages.tqdm
+
+    pythonPackages.pulp
   ];
   # packages = [ pkgs.poetry ];
   venvDir = "./.venv";

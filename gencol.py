@@ -8,6 +8,8 @@ from matplotlib import pyplot as plt
 
 from tqdm import trange
 
+import pulp as pl
+
 
 def place_at_bin(arr, N):
     max_choice = N - arr.sum()
@@ -41,8 +43,32 @@ def solve_rmp(AI, cI, marginal):
         print(result)
         print(AI)
         print(cI)
-        print(marginal)
     return result.x
+
+
+# def solve_rmp(AI, cI, marginal):
+#     # Create a problem variable:
+#     prob = pl.LpProblem("DualProblem", pl.LpMaximize)
+#
+#     # Create decision variables
+#     y_vars = pl.LpVariable.dicts("y", range(
+#         AI.shape[1]), upBound=0)  # y_i <= 0
+#
+#     # Objective function:
+#     prob += pl.lpSum([marginal[i] * y_vars[i] for i in range(AI.shape[1])])
+#
+#     # Constraints:
+#     for j in range(AI.shape[0]):
+#         prob += pl.lpSum([AI[j][i] * y_vars[i]
+#                          for i in range(AI.shape[1])]) <= cI[j]
+#
+#     # Solve the problem:
+#     prob.solve()
+#
+#     if pl.LpStatus[prob.status] == 'Optimal':
+#         return np.array([y_vars[i].varValue for i in range(AI.shape[1])])
+#     else:
+#         return None
 
 
 def solve_dual(AI, cI, marginal):
@@ -100,6 +126,8 @@ def genetic_column_generation(
         for i in t:
             print(f"iteration {i}")
             alpha_I = solve_rmp(AI, cI, marginal)
+            print('solution is')
+            print(alpha_I)
             y_star = solve_dual(AI, cI, marginal)
 
             while gain <= 0 and samples <= maxsamples:
@@ -133,8 +161,8 @@ def genetic_column_generation(
     return AI, alpha_I  # Return the final set of columns and configuration
 
 
-N = 10  # Number of marginals
-l = 100  # Number of sites
+N = 4  # Number of marginals
+l = 10  # Number of sites
 beta = 5  # Hyperparameter for controlling the maximum columns
 maxiter = 5000  # Maximum number of iterations
 # maxsamples = 1000  # Maximum number of samples for mutations
