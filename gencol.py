@@ -33,47 +33,17 @@ def generate_random_cols(N, matrix_size):
 def initialize_AI(N, grid_size, beta=5):
     A = np.eye(grid_size)
     random_cols = generate_random_cols(N, (grid_size, beta - 1))
-    # random_cols = generate_random_cols(N, (beta - 1, grid_size))
     return np.hstack((A, random_cols))
 
 
 def solve_rmp(AI, cI, marginal):
     result = linprog(cI, A_eq=AI, b_eq=marginal, bounds=(0, None))
-    # if result.x is None:
-    #     print(result)
-    #     print(AI)
-    #     print(cI)
-    return result.x
+    return result.x, result.fun
 
 
 def solve_rmp_appprox(AI, cI, marginal):
     alpha, residuals, rank, s = lstsq(AI, marginal)
     return alpha
-
-
-# def solve_rmp(AI, cI, marginal):
-#     # Create a problem variable:
-#     prob = pl.LpProblem("DualProblem", pl.LpMaximize)
-#
-#     # Create decision variables
-#     y_vars = pl.LpVariable.dicts("y", range(
-#         AI.shape[1]), upBound=0)  # y_i <= 0
-#
-#     # Objective function:
-#     prob += pl.lpSum([marginal[i] * y_vars[i] for i in range(AI.shape[1])])
-#
-#     # Constraints:
-#     for j in range(AI.shape[0]):
-#         prob += pl.lpSum([AI[j][i] * y_vars[i]
-#                          for i in range(AI.shape[1])]) <= cI[j]
-#
-#     # Solve the problem:
-#     prob.solve()
-#
-#     if pl.LpStatus[prob.status] == 'Optimal':
-#         return np.array([y_vars[i].varValue for i in range(AI.shape[1])])
-#     else:
-#         return None
 
 
 def solve_dual(AI, cI, marginal):
@@ -157,17 +127,15 @@ def genetic_column_generation(
     iter = 0
     gain = -1
 
+    cost_history = np.empty((maxiter, 1))
+    dual_value_history = np.empty((maxiter, l))
+
     with trange(maxiter) as t:
         for i in t:
-            alpha_I = solve_rmp(AI, cI, marginal)
-            if alpha_I is None:
-                print('Failed to solve the RMP.')
-                print(f"{np.linalg.matrix_rank(AI)=}")
-                print(f"{AI.shape=}")
-                exit(1)
-                # alpha_I = solve_rmp_appprox(AI, cI, marginal)
+            alpha_I, cost = solve_rmp(AI, cI, marginal)
+            cost_history[i] = cost
             y_star = solve_dual(AI, cI, marginal)
-            # y_star = solve_dual_of_rmp(AI, cI, marginal)
+            dual_value_history[i, :] = y_star
 
             while gain <= 0 and samples <= maxsamples:
                 # Select a random active column of AI
@@ -181,25 +149,27 @@ def genetic_column_generation(
 
                 samples += 1
 
-            # samples = 0
-
             # Update AI and cI with the new child column if there's a positive gain
             if gain > 0:
                 AI = np.hstack((AI, child[:, np.newaxis]))
                 # cI = np.hstack((cI, c_child))
-                cI = np.append(c_child)
+                cI = np.append(cI, c_child)
                 if AI.shape[1] > beta * l:
                     # Clear the oldest inactive columns
                     inactive_indices = np.where(alpha_I == 0)[0]
                     AI = np.delete(AI, inactive_indices[:l], axis=1)
-                    # cI = np.delete(cI, inactive_indices[:l], axis=1)
                     cI = np.delete(cI, inactive_indices[:l])
 
             iter += 1
 
-            t.set_postfix(samples=samples)
+            t.set_postfix(samples=samples, cost=cost)
 
-    return AI, alpha_I  # Return the final set of columns and configuration
+    # Return the final set of columns and configuration
+    alpha_I, cost = solve_rmp(AI, cI, marginal)
+    cost_history[i] = cost
+    y_star = solve_dual(AI, cI, marginal)
+    dual_value_history[i, :] = y_star
+    return AI, alpha_I, cost_history, dual_value_history
 
 
 if __name__ == "__main__":
@@ -230,7 +200,7 @@ if __name__ == "__main__":
 
     print("=" * 100)
 
-    ai, alpha = genetic_column_generation(
+    ai, alpha, cost_history, dual_value_history = genetic_column_generation(
         N, grid_size, beta, pair_potential, (0, 1), marginal, maxiter, maxsamples)
 
     print(f"{ai.shape=}")
